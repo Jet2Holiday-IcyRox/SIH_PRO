@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Physician Worklist · AyurFHIR</title>
+<style>
+  /* The physician screen inverts the kiosk's priorities: dense, scannable, and
+     readable at a glance during a two-minute consultation. */
+  :root {
+    --bg: #f6f7f9; --surface: #fff; --ink: #14202e; --muted: #64748b; --line: #e2e8f0;
+    --accent: #0b6b4f; --critical: #b3261e; --urgent: #b45309; --review: #1d4ed8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 400 15px/1.55 "Noto Sans", system-ui, -apple-system, Segoe UI, sans-serif;
+  }
+  header {
+    background: var(--surface); border-bottom: 1px solid var(--line);
+    padding: 14px 22px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    position: sticky; top: 0; z-index: 10;
+  }
+  h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+  h1 small { display: block; font-weight: 400; font-size: 13px; color: var(--muted); }
+  .spacer { flex: 1 1 auto; }
+  .stat { text-align: center; padding: 0 12px; border-left: 1px solid var(--line); }
+  .stat b { display: block; font-size: 22px; line-height: 1.1; }
+  .stat span { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .stat.crit b { color: var(--critical); }
+  main { display: grid; grid-template-columns: 380px 1fr; gap: 18px; padding: 18px 22px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .panel > h2 {
+    margin: 0; padding: 12px 16px; font-size: 13px; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--muted); border-bottom: 1px solid var(--line); background: #fbfcfd;
+  }
+  .row {
+    padding: 14px 16px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; gap: 12px;
+    border-left: 4px solid transparent;
+  }
+  .row:hover { background: #f8fafc; }
+  .row[aria-selected="true"] { background: #eef6f2; border-left-color: var(--accent); }
+  .row.CRITICAL { border-left-color: var(--critical); }
+  .row.URGENT { border-left-color: var(--urgent); }
+  .row.REVIEW { border-left-color: var(--review); }
+  .row .who { flex: 1; min-width: 0; }
+  .row .who b { display: block; font-size: 15px; }
+  .row .who span { font-size: 13px; color: var(--muted); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; letter-spacing: .04em; align-self: flex-start; }
+  .pill.CRITICAL { background: #fdecea; color: var(--critical); }
+  .pill.URGENT { background: #fef3c7; color: var(--urgent); }
+  .pill.REVIEW { background: #dbeafe; color: var(--review); }
+  .pill.ROUTINE { background: #f1f5f9; color: var(--muted); }
+  .detail { padding: 20px 22px; }
+  .banner {
+    background: #fdecea; border: 1px solid #f5c6c2; border-left: 5px solid var(--critical);
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 18px;
+  }
+  .banner b { color: var(--critical); display: block; margin-bottom: 4px; }
+  .banner .why { font-size: 13px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .narrative { font-size: 17px; line-height: 1.6; background: #f8fafc; border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+  .meta { display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 22px 0 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 7px 0; vertical-align: top; border-bottom: 1px solid var(--line); }
+  td:first-child { color: var(--muted); width: 45%; padding-right: 14px; }
+  .codes { display: grid; gap: 10px; }
+  .code {
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  }
+  .code.dual { border-color: #bfe0d1; background: #f4fbf7; }
+  .code .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
+  .code .arrow { color: var(--muted); }
+  .code .grow { flex: 1 1 200px; min-width: 0; }
+  .badge { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: #e8f3ee; color: var(--accent); font-weight: 700; }
+  .badge.unmapped { background: #fef3c7; color: var(--urgent); }
+  .actions { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+  button {
+    font: 600 14px/1 inherit; font-family: inherit; padding: 12px 18px; border-radius: 9px;
+    border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.ghost { color: var(--muted); }
+  pre {
+    background: #10202e; color: #c8e6d8; padding: 16px; border-radius: 10px; overflow: auto;
+    max-height: 420px; font-size: 12px; line-height: 1.5;
+  }
+  .empty { padding: 60px 20px; text-align: center; color: var(--muted); }
+  .abn { color: var(--critical); font-weight: 600; }
+  .status {
+    display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13px;
+    padding: 6px 12px; border-radius: 999px; background: #f1f5f9; color: var(--muted);
+  }
+  .status.CONFIRMED { background: #dcfce7; color: #166534; }
+  .status.AMENDED { background: #fef3c7; color: var(--urgent); }
+  .status.REJECTED { background: #fee2e2; color: var(--critical); }
+  button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    background: #10202e; color: #fff; padding: 13px 22px; border-radius: 10px;
+    font-size: 14px; font-weight: 600; box-shadow: 0 8px 28px rgba(0,0,0,.25);
+    opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 80;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(-6px); }
+  .idrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+  .idrow input {
+    flex: 1 1 220px; min-width: 0; padding: 10px 12px; font: inherit; font-size: 14px;
+    border: 1px solid var(--line); border-radius: 9px; color: var(--ink);
+  }
+  .idrow .known { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Physician Worklist<small>Intake summaries arriving from the kiosk</small></h1>
+  <div class="spacer"></div>
+  <div class="stat crit"><b id="s-crit">0</b><span>Critical</span></div>
+  <div class="stat"><b id="s-wait">0</b><span>Waiting</span></div>
+  <div class="stat"><b id="s-total">0</b><span>Total</span></div>
+</header>
+
+<main>
+  <div class="panel">
+    <h2>Queue — sickest first</h2>
+    <div id="list"><div class="empty">No patients yet.<br><small>Complete an intake at <b>/kiosk</b>.</small></div></div>
+  </div>
+  <div class="panel">
+    <h2>Consultation view</h2>
+    <div id="detail"><div class="empty">Select a patient.</div></div>
+  </div>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* The worklist polls rather than holding a socket: a consultation room screen that
+   silently stops updating is worse than one that refreshes every few seconds. */
+let selected = null;
+let cached = null;
+// Kept across re-renders so acting on a patient does not collapse the bundle you
+// were reading.
+let bundleOpen = false;
+
+function toast(message) {
+  const el = $('toast');
+  el.textContent = message;
+  el.classList.add('show');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function refresh() {
+  try {
+    const data = await (await fetch('/api/worklist')).json();
+    $('s-crit').textContent = data.stats.critical;
+    $('s-wait').textContent = data.stats.waiting;
+    $('s-total').textContent = data.stats.worklistTotal;
+
+    if (!data.items.length) {
+      $('list').innerHTML = '<div class="empty">No patients yet.<br><small>Complete an intake at <b>/kiosk</b>.</small></div>';
+      return;
+    }
+    $('list').innerHTML = data.items.map((item) => `
+      <div class="row ${item.priority}" aria-selected="${selected === item.id}" onclick="openPatient('${item.id}')">
+        <div class="who">
+          <b>${esc(item.patient.name)}</b>
+          <span>${esc(item.chiefComplaint)}${item.ayushMode ? ' · AYUSH' : ''}${item.documents ? ' · ' + item.documents + ' doc' : ''}${item.abha ? ' · ' + esc(item.abha) : ''}</span>
+        </div>
+        <span class="pill ${item.priority}">${item.priority}</span>
+      </div>`).join('');
+  } catch (err) { /* keep the last good render */ }
+}
+
+async function openPatient(id) {
+  selected = id;
+  const data = await (await fetch('/api/worklist/' + id)).json();
+  cached = data.item;
+  renderDetail(cached);
+  refresh();
+}
+
+function renderDetail(item) {
+  const flags = (item.redFlags || []).map((f) => `
+    <div class="banner">
+      <b>${esc(f.priority)} — ${esc(f.concern.en)}</b>
+      <div>${esc(f.action.en)}</div>
+      <div class="why">triggered by: ${esc(f.matched.join(', '))}</div>
+    </div>`).join('');
+
+  const sectionTitles = {
+    complaint: 'Chief complaint', hpi: 'History of presenting illness', past: 'Past history',
+    drugs: 'Drug & allergy history', family: 'Family history', personal: 'Personal history',
+    ayush: 'Dashavidha Pariksha'
+  };
+  const sections = Object.entries(item.sections || {}).map(([key, entries]) => `
+    <h3>${esc(sectionTitles[key] || key)}</h3>
+    <table>${entries.map((e) => `<tr>
+      <td>${esc(e.pariksha || e.question)}</td><td>${esc(e.answer)}</td></tr>`).join('')}</table>`).join('');
+
+  const prakriti = item.prakriti ? `
+    <h3>Prakriti (provisional)</h3>
+    <table><tr><td>Dominant</td><td><b>${esc(item.prakriti.label)}</b> — ${esc(item.prakriti.basis)},
+      requires physician confirmation</td></tr></table>` : '';
+
+  const docs = (item.documents || []).map((d) => `
+    <h3>${esc(d.name)}${d.labName ? ' — ' + esc(d.labName) : ''}</h3>
+    ${(d.results || []).length
+      ? `<table>${d.results.map((r) => `<tr><td>${esc(r.analyte)}</td>
+          <td class="${r.abnormal ? 'abn' : ''}">${esc(r.value)} ${esc(r.unit || '')}
+          ${r.referenceRange ? '<span style="color:var(--muted)"> (ref ' + esc(r.referenceRange) + ')</span>' : ''}</td></tr>`).join('')}</table>`
+      : '<p style="color:var(--muted);font-size:13px">Document attached; no values could be read automatically.</p>'}`).join('');
+
+  const codes = (item.proposals || []).map((p) => `
+    <div class="code ${p.dualCoded ? 'dual' : ''}">
+      <span class="mono">${esc(p.namasteCode)}</span>
+      <span class="arrow">→</span>
+      <span class="mono">${esc(p.icd11Tm2Code || '—')}</span>
+      <span class="grow">${esc(p.termEnglish)}</span>
+      <span class="badge ${p.dualCoded ? '' : 'unmapped'}">${p.dualCoded ? 'DUAL-CODED' : 'UNMAPPED → CURATION'}</span>
+    </div>`).join('');
+
+  $('detail').innerHTML = `
+    <div class="detail">
+      ${flags}
+      <h2 style="margin:0 0 4px;font-size:22px">${esc(item.patient.name)}</h2>
+      <div class="meta">
+        <span>${esc(item.chiefComplaint)}</span>
+        <span>${item.ayushMode ? 'AYUSH OPD' : 'General OPD'}</span>
+        <span>Language: ${esc(item.language)}</span>
+        <span class="status ${esc(item.status)}">${esc(item.status)}${item.reviewedAt ? ' · ' + new Date(item.reviewedAt).toLocaleTimeString() : ''}</span>
+      </div>
+      <div class="idrow">
+        ${item.patient.abha
+          ? `<span class="status">ABHA ${esc(item.patient.abha.display)}</span>
+             <span class="known">${item.patient.abha.knownToDirectory
+               ? 'matched in directory · identity not yet OTP-verified'
+               : 'self-declared · not found in directory'}</span>`
+          : `<input id="abha-input" placeholder="Attach ABHA — address or 14-digit number"
+                onkeydown="if(event.key==='Enter')attachAbha()">
+             <button onclick="attachAbha()">Attach ABHA</button>
+             <span class="known">Walk-in — no ABHA captured at the kiosk</span>`}
+      </div>
+      <div class="narrative">${esc(item.narrative)}</div>
+      ${sections}${prakriti}${docs}
+      <h3>Proposed coding — physician confirms</h3>
+      <div class="codes">${codes || '<p style="color:var(--muted)">No concept proposed; routed to curation.</p>'}</div>
+      <div class="actions">
+        <button class="primary" aria-pressed="${item.status === 'CONFIRMED'}"
+          ${item.status === 'CONFIRMED' ? 'disabled' : ''}
+          onclick="review('CONFIRMED')">${item.status === 'CONFIRMED' ? '✓ Confirmed &amp; saved' : 'Confirm &amp; save to record'}</button>
+        <button aria-pressed="${item.status === 'AMENDED'}" onclick="review('AMENDED')">Amend</button>
+        <button class="ghost" aria-pressed="${item.status === 'REJECTED'}" onclick="review('REJECTED')">Reject coding</button>
+        <button class="ghost" onclick="toggleBundle()">${bundleOpen ? 'Hide' : 'View'} FHIR Bundle</button>
+      </div>
+      <div id="bundle" style="display:${bundleOpen ? 'block' : 'none'}"><h3>FHIR R4 transaction bundle — pushed to HIS / ABHA</h3>
+        <pre>${esc(JSON.stringify(item.bundle, null, 2))}</pre></div>
+    </div>`;
+}
+
+function toggleBundle() {
+  bundleOpen = !bundleOpen;
+  renderDetail(cached);
+}
+
+const REVIEW_MESSAGE = {
+  CONFIRMED: 'Confirmed — coded record saved to the patient\u2019s ABHA record.',
+  AMENDED: 'Marked for amendment — coding held for correction.',
+  REJECTED: 'Coding rejected — routed to the curation queue for review.'
+};
+
+async function review(status) {
+  if (!cached) return;
+  try {
+    const res = await fetch('/api/worklist/' + cached.id + '/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    toast(REVIEW_MESSAGE[status] || ('Status set to ' + status));
+    await openPatient(cached.id);
+  } catch (err) {
+    toast('Could not save: ' + err.message);
+  }
+}
+
+/** Attaches an ABHA to a walk-in who completed intake without one. */
+async function attachAbha() {
+  if (!cached) return;
+  const input = $('abha-input');
+  const value = (input && input.value || '').trim();
+  if (!value) return;
+  try {
+    const res = await fetch('/api/worklist/' + cached.id + '/abha', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ abha: value })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast(data.error === 'bad-address' || data.error === 'bad-number'
+        ? 'That is not a valid ABHA address or number.'
+        : 'Could not attach: ' + (data.error || res.status));
+      return;
+    }
+    toast(data.item.patient.abha.knownToDirectory
+      ? 'ABHA attached and matched in the directory.'
+      : 'ABHA attached — not found in the directory, recorded as self-declared.');
+    await openPatient(cached.id);
+  } catch (err) {
+    toast('Could not attach: ' + err.message);
+  }
+}
+
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

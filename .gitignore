@@ -1,10 +1,52 @@
-
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
 node_modules/
+
+# ---------------------------------------------------------------------------
+# Environment / secrets
+#
+# One .env at the repo root is the single source of truth (see .env.example).
+# The bare patterns below have no leading slash, so they match at any depth:
+# a stray backend/.env or client/.env.production is ignored too.
+# ---------------------------------------------------------------------------
 .env
-.env.local
+.env.*
+!.env.example
 secrets/
 *service-account*.json
-npm-debug.log*
+*.pem
+*.p12
+*.key
+!firestore.indexes.json
 
-# Firebase emulator artifacts
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+npm-debug.log*
+yarn-error.log*
 *-debug.log
+
+# ---------------------------------------------------------------------------
+# Deploy / tooling caches
+# ---------------------------------------------------------------------------
+.vercel
+.firebase/
+.DS_Store
+
+# ---------------------------------------------------------------------------
+# Local data that is generated, licensed, or holds identities
+# ---------------------------------------------------------------------------
+# Local ABHA directory bridge (mirrors the portal; contains masked demo identities)
+data/abha_directory.json
+# Generated from the Ministry of Ayush workbook by scripts/build-terminology.js
+data/namaste_terminology.json
+# The source workbook itself — redistribute it from the Ministry, not from here
+*.xls
+*.xlsx
+
+# ---------------------------------------------------------------------------
+# Scratch output from local agent tooling
+# ---------------------------------------------------------------------------
+brag-output/
+graphify-out/

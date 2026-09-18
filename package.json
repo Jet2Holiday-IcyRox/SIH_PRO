@@ -14,7 +14,8 @@
     "dev:backend": "npm --workspace backend run dev",
     "dev:client": "npm --prefix client run dev",
     "dev:admin": "npm --prefix admin run dev",
-    "test:backend": "npm --workspace backend test"
+    "test:backend": "npm --workspace backend test",
+    "build:terminology": "node scripts/build-terminology.js"
   },
   "keywords": [
     "icd-11",
@@ -28,6 +29,7 @@
   "author": "AyurFHIR Team",
   "license": "ISC",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.126.0",
     "cors": "^2.8.5",
     "express": "^4.19.2"
   }

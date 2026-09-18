@@ -23,6 +23,8 @@ const ICD11_CONTAINER_HOST = process.env.ICD11_HOST || 'http://localhost';
 
 // Load Ayurveda NAMASTE Terminology Dataset
 const DATA_FILE = path.join(__dirname, 'data', 'namaste_ayurveda.json');
+// Generated from the official Ministry of Ayush release by scripts/build-terminology.js.
+const RELEASE_DATA_FILE = path.join(__dirname, 'data', 'namaste_terminology.json');
 // index.html and admin.html sit next to this file; client/ and admin/ hold copies
 // served by their own standalone servers.
 const STATIC_ROOT = __dirname;
@@ -30,7 +32,12 @@ const STATIC_ROOT = __dirname;
 // Only the practitioner portal is served from here. '/admin' is handled by the
 // backend app below, which owns the real admin console in frontend/admin/.
 const PAGE_ROUTES = {
-  '/': 'index.html'
+  '/': 'index.html',
+  // Patient-facing clinical intake kiosk and the physician worklist it feeds.
+  '/kiosk': 'kiosk.html',
+  '/kiosk/': 'kiosk.html',
+  '/worklist': 'worklist.html',
+  '/worklist/': 'worklist.html'
 };
 
 // STATIC_ROOT is the repository root, so only root-level assets are servable and
@@ -72,9 +79,27 @@ function resolveStatic(pathname) {
   return path.join(STATIC_ROOT, name);
 }
 let TERMINOLOGY_DB = [];
+let TERMINOLOGY_META = {
+  source: 'legacy demo dataset',
+  totalConcepts: 0,
+  officiallyMapped: 0,
+  unmapped: 0
+};
+
+// The real release, built by scripts/build-terminology.js from the Ministry of Ayush
+// "NATIONAL AYURVEDA MORBIDITY CODES" workbook, is preferred. The older hand-written
+// demo file stays as a fallback so the portal still runs on a fresh clone that has not
+// generated it yet.
 try {
-  if (fs.existsSync(DATA_FILE)) {
+  if (fs.existsSync(RELEASE_DATA_FILE)) {
+    const payload = JSON.parse(fs.readFileSync(RELEASE_DATA_FILE, 'utf8'));
+    TERMINOLOGY_DB = payload.concepts || [];
+    TERMINOLOGY_META = payload.meta || TERMINOLOGY_META;
+    console.log(`[TERMINOLOGY] NAMASTE release loaded: ${TERMINOLOGY_META.totalConcepts} concepts, ` +
+      `${TERMINOLOGY_META.officiallyMapped} officially mapped to ICD-11 TM2.`);
+  } else if (fs.existsSync(DATA_FILE)) {
     TERMINOLOGY_DB = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    console.warn('[TERMINOLOGY] Using the legacy demo dataset. Run `npm run build:terminology` for the real release.');
   }
 } catch (e) {
   console.warn('[WARN] Failed to load dataset from file, using fallback array:', e.message);
@@ -97,6 +122,10 @@ const CURATION_QUEUE = [
 ];
 
 const STORED_CONDITIONS = [];
+
+// Clinical intake kiosk (SIH26047). Mounted below, after the FHIR operations.
+const { createIntakeRoutes } = require('./intake/routes');
+let intakeRoutes = null;
 
 // Entity memory cache for instant offline & high-speed responses
 const ENTITY_CACHE = new Map();
@@ -250,9 +279,10 @@ const server = http.createServer(async (req, res) => {
         status: 'UP',
         timestamp: new Date().toISOString(),
         versionStamps: {
-          namasteRelease: 'NAMASTE-2024.1',
-          icd11Release: 'ICD-11-2026-01-MMS',
-          tm2Chapter: 'Chapter 26 (Module II)'
+          namasteRelease: TERMINOLOGY_META.namasteRelease || 'NAMASTE-2024.1',
+          icd11Release: TERMINOLOGY_META.icd11Release || 'ICD-11-2026-01-MMS',
+          tm2Chapter: TERMINOLOGY_META.tm2Chapter || 'Chapter 26 (Module II)',
+          source: TERMINOLOGY_META.source || 'legacy demo dataset'
         },
         icd11Container: {
           target: ICD11_CONTAINER_HOST,
@@ -262,6 +292,8 @@ const server = http.createServer(async (req, res) => {
         database: {
           system: 'PostgreSQL-ready / Local Pre-sync',
           ayurvedaConceptCount: TERMINOLOGY_DB.length,
+          officiallyMappedToTm2: TERMINOLOGY_META.officiallyMapped || 0,
+          awaitingCuration: TERMINOLOGY_META.unmapped || 0,
           curationQueueLength: CURATION_QUEUE.length,
           storedConditionsCount: STORED_CONDITIONS.length
         }
@@ -374,42 +406,47 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-      // Validated mapping with FHIR ConceptMap equivalence
+      // Validated mapping with FHIR ConceptMap equivalence.
+      const matches = [{
+        name: 'match',
+        part: [
+          { name: 'equivalence', valueCode: match.relationship || 'equivalent' },
+          {
+            name: 'concept',
+            valueCoding: {
+              system: 'http://id.who.int/icd/release/11/mms/tm2',
+              code: match.icd11Tm2Code,
+              display: match.icd11Tm2Title || `${match.termEnglish} (ICD-11 TM2)`
+            }
+          },
+          { name: 'confidence', valueDecimal: match.confidence / 100 }
+        ]
+      }];
+
+      // The NAMASTE release publishes a TM2 crosswalk but no biomedical MMS
+      // equivalent, so a second match is emitted only where an MMS code actually
+      // exists. Emitting a Coding with no code would assert a mapping nobody made.
+      if (match.icd11MmsCode) {
+        matches.push({
+          name: 'match',
+          part: [
+            { name: 'equivalence', valueCode: 'related-to' },
+            {
+              name: 'concept',
+              valueCoding: {
+                system: 'http://id.who.int/icd/release/11/mms',
+                code: match.icd11MmsCode,
+                display: `${match.termEnglish} (biomedical MMS)`
+              }
+            },
+            { name: 'confidence', valueDecimal: (match.confidence - 5) / 100 }
+          ]
+        });
+      }
+
       return sendJson(res, 200, {
         resourceType: 'Parameters',
-        parameter: [
-          { name: 'result', valueBoolean: true },
-          {
-            name: 'match',
-            part: [
-              { name: 'equivalence', valueCode: match.relationship || 'equivalent' },
-              {
-                name: 'concept',
-                valueCoding: {
-                  system: 'http://id.who.int/icd/release/11/mms/tm2',
-                  code: match.icd11Tm2Code,
-                  display: `${match.termEnglish} (ICD-11 TM2)`
-                }
-              },
-              { name: 'confidence', valueDecimal: match.confidence / 100 }
-            ]
-          },
-          {
-            name: 'match',
-            part: [
-              { name: 'equivalence', valueCode: 'related-to' },
-              {
-                name: 'concept',
-                valueCoding: {
-                  system: 'http://id.who.int/icd/release/11/mms',
-                  code: match.icd11MmsCode,
-                  display: `${match.termEnglish} (biomedical MMS)`
-                }
-              },
-              { name: 'confidence', valueDecimal: (match.confidence - 5) / 100 }
-            ]
-          }
-        ]
+        parameter: [{ name: 'result', valueBoolean: true }, ...matches]
       });
     }
 
@@ -502,6 +539,55 @@ const server = http.createServer(async (req, res) => {
     }
 
     // -------------------------------------------------------------
+    // 5a. Full concept list for the practitioner portal.
+    //
+    // The portal keeps a client-side copy so its search, explorer and ConceptMap
+    // viewer stay instant. It ships with a small offline seed; this endpoint
+    // replaces that seed with the real release at boot, which is why the portal
+    // shows 2,892 concepts rather than the handful baked into the page.
+    // -------------------------------------------------------------
+    if (pathname === '/api/terminology/concepts' && method === 'GET') {
+      const stream = String(parsedUrl.query.stream || '').toLowerCase();
+      const concepts = TERMINOLOGY_DB
+        .filter((c) => !stream || (c.system || '').toLowerCase() === stream)
+        .map((c) => ({
+          id: c.id,
+          namasteCode: c.namasteCode,
+          termEnglish: c.termEnglish,
+          termSanskrit: c.termSanskrit,
+          icd11Tm2Code: c.icd11Tm2Code || null,
+          icd11Tm2Title: c.icd11Tm2Title || null,
+          icd11MmsCode: c.icd11MmsCode || null,
+          snomedCode: c.snomedCode || null,
+          ayushStream: c.ayushStream || 'Ayurveda',
+          confidence: c.confidence,
+          mappingStatus: c.mappingStatus || (c.icd11Tm2Code ? 'official-tm2' : 'unmapped'),
+          // Definitions in the release run to several hundred words; the portal
+          // only renders a one-line preview, so the payload is trimmed here rather
+          // than shipping ~2 MB of prose the UI never shows.
+          description: String(c.definition || '').slice(0, 180)
+        }));
+
+      return sendJson(res, 200, { meta: TERMINOLOGY_META, total: concepts.length, concepts });
+    }
+
+    // -------------------------------------------------------------
+    // 5b. Clinical intake kiosk + physician worklist
+    // -------------------------------------------------------------
+    if (pathname.startsWith('/api/intake') || pathname.startsWith('/api/worklist') || pathname.startsWith('/api/abha')) {
+      if (!intakeRoutes) {
+        intakeRoutes = createIntakeRoutes({
+          terminology: TERMINOLOGY_DB,
+          terminologyMeta: TERMINOLOGY_META,
+          curationQueue: CURATION_QUEUE,
+          readJsonBody,
+          sendJson
+        });
+      }
+      if (await intakeRoutes(req, res, pathname, method, parsedUrl.query)) return;
+    }
+
+    // -------------------------------------------------------------
     // 6. Curation Queue Endpoints
     // -------------------------------------------------------------
     if (pathname === '/api/curation' && method === 'GET') {
@@ -587,5 +673,7 @@ server.listen(PORT, () => {
   console.log(`  Live ICD-11 Host: ${ICD11_CONTAINER_HOST}`);
   console.log(`  Test Entity URL:  http://localhost:${PORT}/icd/entity/2066255370`);
   console.log(`  FHIR Expansion:   http://localhost:${PORT}/ValueSet/$expand?q=Amlapitta`);
+  console.log(`  Intake Kiosk:     http://localhost:${PORT}/kiosk`);
+  console.log(`  Physician View:   http://localhost:${PORT}/worklist`);
   console.log('================================================================');
 });

@@ -1342,7 +1342,7 @@
           <div class="flex items-stretch gap-2">
             <div class="relative flex-1">
               <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xl">search</span>
-              <input id="terminology-search-input" type="text" oninput="performTerminologySearch()" placeholder="Try: Amlapitta, अम्लपित्तम्, NAM-AYU-0012, DA42.0 …" class="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-teal-600 focus:bg-white transition-all text-sm" />
+              <input id="terminology-search-input" type="text" oninput="performTerminologySearch()" placeholder="Try: Amlapitta, अम्लपित्तम्, EB-4, DA42.0 …" class="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-teal-600 focus:bg-white transition-all text-sm" />
             </div>
             <select id="terminology-stream-filter" onchange="performTerminologySearch()" class="p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-teal-600 text-xs font-semibold">
               <option value="">All streams</option>
@@ -1351,6 +1351,7 @@
               <option value="Unani">Unani</option>
             </select>
           </div>
+          <p id="terminology-meta" class="text-[11px] text-slate-500 font-semibold border-l-2 border-teal-500 pl-2">Loading the NAMASTE release…</p>
           <p class="text-[11px] text-slate-400">Not sure what a term means? Tap the <span class="material-symbols-outlined text-[13px] align-text-bottom">help</span> button in the bottom-left corner.</p>
           <div id="terminology-results" class="space-y-3"></div>
         </div>
@@ -1791,6 +1792,7 @@
     { code: "WellnessRecord", display: "Wellness Record" }
   ];
 
+  let TERMINOLOGY_META = null;
   const TERMINOLOGY_DATABASE = [
     { id: "AY-AML-01", namasteCode: "NAM-AYU-0012", icd11Tm2Code: "TM2-AYU-G01.2", icd11MmsCode: "DA42.0", snomedCode: "62315008", termEnglish: "Amlapitta", termSanskrit: "अम्लपित्तम्", ayushStream: "Ayurveda", confidence: 98, description: "Clinical condition characterized by sour belching, indigestion, and burning sensation in the chest, correlating with hyperacidity or acid peptic disease." },
     { id: "AY-JVA-01", namasteCode: "NAM-AYU-0045", icd11Tm2Code: "TM2-AYU-F04.1", icd11MmsCode: "MG26", snomedCode: "386661006", termEnglish: "Jvara (Fever)", termSanskrit: "ज्वरः", ayushStream: "Ayurveda", confidence: 96, description: "Elevated body temperature accompanied by loss of appetite and body malaise, categorized by dosha predominance (Vataja, Pittaja, Kaphaja)." },
@@ -3248,7 +3250,29 @@
         updatedAt: SV()
       };
 
-      return fbDb.ref("abha/" + abhaKey).set(record).then(function () {
+      // Mirror the masked entry to the intake kiosk's directory bridge. The kiosk
+      // page has no signed-in Firebase user, so it cannot read abhaDirectory itself;
+      // only the same masked fields that are already pre-consent-readable cross over.
+      function mirrorToKiosk() {
+        return fetch("/api/abha/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            abhaAddress: res.abhaAddress,
+            abhaKey: abhaKey,
+            nameMasked: maskName(fullName),
+            abhaNumberMasked: maskAbhaNumber(abhaKey),
+            mobileMasked: state.kyc.mobileMasked || "****",
+            gender: gender,
+            yearOfBirth: parseInt(dob.slice(0, 4), 10)
+          })
+        }).catch(function (err) {
+          // The kiosk bridge is a convenience, never a blocker on ABHA creation.
+          console.warn("[abha] kiosk mirror failed:", err.message);
+        });
+      }
+
+      return fbDb.ref("abha/" + abhaKey).set(record).then(mirrorToKiosk).then(function () {
         return fbDb.ref("abhaDirectory/" + addressToKey(res.abhaAddress)).set({
           abhaAddress: res.abhaAddress,
           abhaKey: abhaKey,
@@ -6030,9 +6054,21 @@
       return;
     }
 
-    host.innerHTML = hits.map(function (c) {
-      const conf = c.confidence >= 95 ? "bg-emerald-100 text-emerald-800"
-        : c.confidence >= 85 ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-800";
+    // The full release is 2,892 concepts. Rendering all of them on an empty query
+    // would freeze the page, so show a window and tell the user what was trimmed.
+    const RENDER_LIMIT = 40;
+    const shown = hits.slice(0, RENDER_LIMIT);
+    const trimmed = hits.length - shown.length;
+
+    host.innerHTML = shown.map(function (c) {
+      // A concept is either published in the release with a TM2 pair, or it has no
+      // mapping at all. Rendering "null% match" for the latter would imply a failed
+      // score where the truth is that nobody has mapped it yet.
+      const mapped = !!c.icd11Tm2Code;
+      const conf = mapped ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800";
+      const confLabel = mapped
+        ? (c.confidence === 100 ? "Official TM2 mapping" : c.confidence + "% match")
+        : "Awaiting curation";
       return '<div class="p-4 border border-slate-200 rounded-xl hover:border-teal-400 transition-colors space-y-3">'
         + '<div class="flex flex-wrap items-start justify-between gap-2">'
         + "<div><p class=\"font-bold text-slate-900 text-sm\">" + escapeHtml(c.termEnglish)
@@ -6040,7 +6076,7 @@
         + '<p class="text-[11px] text-slate-500 mt-0.5">' + escapeHtml(c.description) + "</p></div>"
         + '<div class="flex items-center gap-1.5 shrink-0">'
         + '<span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold">' + escapeHtml(c.ayushStream) + "</span>"
-        + '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold ' + conf + '">' + c.confidence + "% match</span></div></div>"
+        + '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold ' + conf + '">' + confLabel + "</span></div></div>"
         + '<div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">'
         + codeCell("NAMASTE", c.namasteCode, "text-teal-700")
         + codeCell("ICD-11 TM2", c.icd11Tm2Code, "text-emerald-700")
@@ -6051,7 +6087,10 @@
         + '<button onclick="copyText(\'' + jsId(c.namasteCode) + '\', \'NAMASTE code copied.\')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold transition-colors">Copy NAMASTE</button>'
         + '<button onclick="showConceptMap(\'' + jsId(c.namasteCode) + '\')" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[10px] font-bold transition-colors">View ConceptMap</button>'
         + "</div></div>";
-    }).join("");
+    }).join("") + (trimmed > 0
+      ? '<div class="p-4 text-center text-[11px] text-slate-400">Showing ' + shown.length
+        + ' of ' + hits.length.toLocaleString("en-IN") + ' matches — refine the search to narrow it.</div>'
+      : "");
   }
 
   function codeCell(label, code, tone) {
@@ -7181,6 +7220,44 @@
     }, 30000);
   }
 
+  /**
+   * The page ships with a small offline seed of TERMINOLOGY_DATABASE so it renders
+   * with no server. At boot we replace that seed in place with the real NAMASTE
+   * release served by /api/terminology/concepts — mutating the same array means the
+   * search, explorer, ConceptMap viewer and API console all pick it up without any
+   * of them needing to know where the data came from.
+   */
+  function hydrateTerminology() {
+    return fetch("/api/terminology/concepts")
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (payload) {
+        if (!payload || !Array.isArray(payload.concepts) || !payload.concepts.length) return;
+        TERMINOLOGY_DATABASE.length = 0;
+        Array.prototype.push.apply(TERMINOLOGY_DATABASE, payload.concepts);
+        TERMINOLOGY_META = payload.meta || null;
+        renderTerminologyMeta();
+        performTerminologySearch();
+        renderFhirSampleList();
+        renderExplorer();
+      })
+      .catch(function (err) {
+        console.warn("[terminology] live release unavailable, using offline seed:", err.message);
+        renderTerminologyMeta();
+      });
+  }
+
+  function renderTerminologyMeta() {
+    const host = document.getElementById("terminology-meta");
+    if (!host) return;
+    if (!TERMINOLOGY_META) {
+      host.textContent = "Offline seed — " + TERMINOLOGY_DATABASE.length + " demo concepts. Start the server for the full release.";
+      return;
+    }
+    host.textContent = TERMINOLOGY_META.totalConcepts.toLocaleString("en-IN") + " NAMASTE concepts · "
+      + TERMINOLOGY_META.officiallyMapped.toLocaleString("en-IN") + " officially mapped to ICD-11 TM2 · "
+      + TERMINOLOGY_META.unmapped.toLocaleString("en-IN") + " awaiting curation · " + TERMINOLOGY_META.icd11Release;
+  }
+
   function boot() {
     populateHospitalSelects();
     populateApiConsole();
@@ -7193,6 +7270,7 @@
     bindGlobalHandlers();
     switchTab("home");
     initFirebase();
+    hydrateTerminology();
   }
 
   if (document.readyState === "loading") {
