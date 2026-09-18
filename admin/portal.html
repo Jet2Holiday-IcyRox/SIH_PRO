@@ -2254,10 +2254,7 @@
   }
 
   function useDemoAccount(persona) {
-    const presets = {
-      patient:  { email: "patient.demo@ayurfhir.in",  password: "Demo@12345", role: "patient",  name: "Ravi Kumar" },
-      hospital: { email: "hospital.demo@ayurfhir.in", password: "Demo@12345", role: "hospital", name: "Sushruta Ayurveda Hospital" }
-    };
+    const presets = {};
     const p = presets[persona];
     if (!p) return;
     document.getElementById("signin-email").value = p.email;

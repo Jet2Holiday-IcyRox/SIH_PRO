@@ -57,7 +57,7 @@ narrative and extracts values from OCR'd lab reports. Without an API key — or 
 fails or times out — the kiosk behaves identically using its deterministic output. It can
 never introduce a clinical question, assign a code, or state a diagnosis.
 
-Provider is selected from whichever key is present in `backend/.env`, Gemini first:
+Provider is selected from whichever key is present in `.env`, Gemini first:
 
 | Key | Provider | Default model |
 | --- | --- | --- |
@@ -230,12 +230,12 @@ npx firebase-tools emulators:exec --only firestore "node test/firestore-rules.te
 
 ## Firebase setup
 
-Login uses **Firebase Authentication (Email/Password)** in the browser and **Firebase Admin + Cloud Firestore** on the server. Fill `backend/.env` from `backend/.env.example`:
+Login uses **Firebase Authentication (Email/Password)** in the browser and **Firebase Admin + Cloud Firestore** on the server. Fill the repo-root `.env` from `.env.example` — one file configures every process:
 
 1. **Enable the provider** — Firebase Console → Authentication → Sign-in method → enable *Email/Password*.
 2. **Enable Firestore** — Console → Build → Firestore Database → Create database. Profiles are written to `users/{uid}` and request logs to `apiRequests/{id}` by the server only.
 3. **Web config** — Console → Project settings → General → Your apps → Web app. Copy into `FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_MESSAGING_SENDER_ID`, `FIREBASE_APP_ID`. These are public by design and are served to the browser by `GET /api/v1/auth/config`; the pages no longer hardcode them.
-4. **Service account** — Console → Project settings → Service accounts → Generate new private key. Save it outside version control (`backend/secrets/` is gitignored) and point `FIREBASE_SERVICE_ACCOUNT_PATH` at it, or paste the JSON into `FIREBASE_SERVICE_ACCOUNT_JSON`. **This is a server-only secret — never ship it to the browser.**
+4. **Service account** — Console → Project settings → Service accounts → Generate new private key. Paste the whole JSON on one line into `FIREBASE_SERVICE_ACCOUNT_JSON` (this is the form a hosted deploy needs, since there is no file to point at), or keep it as a file outside version control (`secrets/` and `*service-account*.json` are gitignored) and point `FIREBASE_SERVICE_ACCOUNT_PATH` at it. Inline JSON wins if both are set. **This is a server-only secret — never ship it to the browser.**
 5. **First admin** — put your email in `ADMIN_BOOTSTRAP_EMAILS`. That account gets `role: admin` on first sign-in; it can then promote others from the admin console.
 6. **Deployed domains** — Console → Authentication → Settings → Authorized domains must list the host you serve from.
 
@@ -347,6 +347,55 @@ escaped before it is concatenated.
 `backend/src/integrations/icd/icdAdapter.js` is the ICD-API boundary (HTTP, timeouts, release discovery, TTL cache) and `backend/src/services/icdService.js` normalises the API's JSON-LD into the flat, HTML-safe shape the portals consume.
 
 `backend/src/integrations/firebase/firebaseAdapter.js` is the server-side Firebase boundary: token verification, Firestore profiles, roles, and custom claims. Without a service account it falls back to an in-memory store and verifies nothing, which keeps the demo and tests runnable.
+
+## Configuration
+
+One `.env` at the repo root configures everything — `server.js`, the backend it imports, the
+intake kiosk and `scripts/build-terminology.js` all read the same file. Copy `.env.example`,
+which documents every variable the code reads, and fill in what you need:
+
+```bash
+cp .env.example .env
+```
+
+Nothing in it is required to boot. With an empty `.env` the portal runs in local demo mode:
+deterministic intake, the bundled terminology, no auth. `.env` and `.env.*` are gitignored
+(`.env.example` is the deliberate exception), as are `secrets/` and any `*service-account*.json`.
+
+Two variables were renamed so every entrypoint reads one name. The old spellings still work as
+a fallback, so existing local setups do not break:
+
+| Old | Now |
+| --- | --- |
+| `ICD11_HOST` | `ICD_API_BASE_URL` |
+| `ICD11_RELEASE` | `ICD_API_RELEASE_ID` |
+
+## Deploying to Vercel
+
+`api/index.js` is the serverless entrypoint. `server.js` exports its request handler and only
+calls `listen()` when run directly, so `npm start` and Vercel share one implementation, and
+`vercel.json` rewrites every path to that handler.
+
+1. Import the repo in Vercel. No build step is needed — it is a plain Node function.
+2. Add every non-blank variable from your `.env` under **Project Settings → Environment Variables**.
+   Use `FIREBASE_SERVICE_ACCOUNT_JSON` (single-line JSON) rather than the `_PATH` form: the
+   deployment bundle has no writable place for a key file.
+3. Add the deployment domain to **Firebase Console → Authentication → Settings → Authorized domains**,
+   or sign-in fails on the deployed host.
+
+### What does not survive serverless
+
+The prototype keeps state in process memory, which a serverless platform reclaims between
+invocations. These degrade on Vercel and are the work remaining before it is more than a demo:
+
+- The curation queue, stored conditions, ICD entity cache and intake sessions (`intake/store.js`)
+  are per-instance and vanish on a cold start. They need Firestore behind them.
+- The ABHA directory mirror falls back to `/tmp`, which survives warm invocations only.
+- `ICD_API_BASE_URL` defaults to `http://localhost`, which does not exist in a Vercel function.
+  The WHO ICD-API container must be reachable at a public URL, or ICD-11 lookups fail closed.
+
+Firestore rules are deployed separately with `npx firebase deploy --only firestore:rules` — they
+are not part of the app bundle.
 
 ## Security and prototype limits
 

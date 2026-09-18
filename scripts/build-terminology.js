@@ -21,8 +21,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const ICD_HOST = process.env.ICD11_HOST || 'http://localhost';
-const ICD_RELEASE = process.env.ICD11_RELEASE || '2026-01';
+require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
+
+// ICD11_HOST / ICD11_RELEASE are the legacy names, still honoured as a fallback.
+const ICD_HOST = process.env.ICD_API_BASE_URL || process.env.ICD11_HOST || 'http://localhost';
+const ICD_RELEASE = process.env.ICD_API_RELEASE_ID || process.env.ICD11_RELEASE || '2026-01';
 const OUT = path.join(__dirname, '..', 'data', 'namaste_terminology.json');
 
 // NAMC_CODE holds both codes when a row is TM2-mapped. Spacing is inconsistent in

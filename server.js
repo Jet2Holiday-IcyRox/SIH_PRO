@@ -18,8 +18,15 @@ const fs = require('fs');
 const path = require('path');
 const url = require('url');
 
+// The single root .env configures this process, the backend it mounts, and the intake kiosk.
+// Anchored to __dirname so `npm start` works from anywhere; on Vercel the file is absent and
+// the platform's own environment variables are already in process.env.
+require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
+
 const PORT = process.env.PORT || 3000;
-const ICD11_CONTAINER_HOST = process.env.ICD11_HOST || 'http://localhost';
+// ICD11_HOST is the legacy name for this; ICD_API_BASE_URL is what the rest of the repo reads.
+const ICD11_CONTAINER_HOST =
+  process.env.ICD_API_BASE_URL || process.env.ICD11_HOST || 'http://localhost';
 
 // Load Ayurveda NAMASTE Terminology Dataset
 const DATA_FILE = path.join(__dirname, 'data', 'namaste_ayurveda.json');
@@ -233,8 +240,9 @@ function sendJson(res, statusCode, data) {
   res.end(JSON.stringify(data, null, 2));
 }
 
-// Initialize and start HTTP server
-const server = http.createServer(async (req, res) => {
+// The request handler is defined standalone and exported so a serverless platform
+// (Vercel) can invoke it per-request, while a normal `node server.js` still binds a port.
+async function handleRequest(req, res) {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
   const method = req.method.toUpperCase();
@@ -663,17 +671,25 @@ const server = http.createServer(async (req, res) => {
       issue: [{ severity: 'fatal', code: 'exception', diagnostics: globalErr.message }]
     });
   }
-});
+}
 
-server.listen(PORT, () => {
-  console.log('================================================================');
-  console.log(`  AyurFHIR Terminology Microservice is running!`);
-  console.log(`  Port:             http://localhost:${PORT}`);
-  console.log(`  Admin Console:    http://localhost:${PORT}/admin/`);
-  console.log(`  Live ICD-11 Host: ${ICD11_CONTAINER_HOST}`);
-  console.log(`  Test Entity URL:  http://localhost:${PORT}/icd/entity/2066255370`);
-  console.log(`  FHIR Expansion:   http://localhost:${PORT}/ValueSet/$expand?q=Amlapitta`);
-  console.log(`  Intake Kiosk:     http://localhost:${PORT}/kiosk`);
-  console.log(`  Physician View:   http://localhost:${PORT}/worklist`);
-  console.log('================================================================');
-});
+// Vercel imports this module and calls the export once per request; there is no port to bind.
+module.exports = handleRequest;
+module.exports.handleRequest = handleRequest;
+
+// Only listen when run directly (`node server.js`), never when imported.
+if (require.main === module) {
+  const server = http.createServer(handleRequest);
+  server.listen(PORT, () => {
+    console.log('================================================================');
+    console.log(`  AyurFHIR Terminology Microservice is running!`);
+    console.log(`  Port:             http://localhost:${PORT}`);
+    console.log(`  Admin Console:    http://localhost:${PORT}/admin/`);
+    console.log(`  Live ICD-11 Host: ${ICD11_CONTAINER_HOST}`);
+    console.log(`  Test Entity URL:  http://localhost:${PORT}/icd/entity/2066255370`);
+    console.log(`  FHIR Expansion:   http://localhost:${PORT}/ValueSet/$expand?q=Amlapitta`);
+    console.log(`  Intake Kiosk:     http://localhost:${PORT}/kiosk`);
+    console.log(`  Physician View:   http://localhost:${PORT}/worklist`);
+    console.log('================================================================');
+  });
+}

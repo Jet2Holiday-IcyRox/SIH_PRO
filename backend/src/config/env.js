@@ -3,9 +3,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
-// Anchor to backend/ so `.env` and relative credential paths resolve the same way whether the
-// process is started from the repo root or from the workspace.
+// One .env at the repo root configures every process in this monorepo, so the backend resolves
+// the same file whether it is started from the root, from the workspace, or by server.js.
+// Anchoring to __dirname (not cwd) is what makes that true. A pre-existing backend/.env is still
+// read afterwards for backwards compatibility; dotenv never overwrites an already-set variable,
+// so the root file always wins.
 const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const repoRoot = path.resolve(backendRoot, '..');
+dotenv.config({ path: path.join(repoRoot, '.env'), quiet: true });
 dotenv.config({ path: path.join(backendRoot, '.env'), quiet: true });
 
 // The service account is a server-only secret. It may be supplied either as an inline JSON
@@ -13,10 +18,16 @@ dotenv.config({ path: path.join(backendRoot, '.env'), quiet: true });
 function loadServiceAccount() {
   const inline = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
   const filePath = (process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '').trim();
-  const resolvedPath = filePath ? path.resolve(backendRoot, filePath) : '';
-  if (resolvedPath && !fs.existsSync(resolvedPath)) {
-    console.warn(`[firebase] FIREBASE_SERVICE_ACCOUNT_PATH points at a missing file: ${resolvedPath}`);
-    return null;
+  // Inline JSON wins, so a hosted deploy needs no file at all. The path form is resolved against
+  // the repo root first and then backend/, which keeps older ./secrets/... values working.
+  let resolvedPath = '';
+  if (!inline && filePath) {
+    const candidates = [path.resolve(repoRoot, filePath), path.resolve(backendRoot, filePath)];
+    resolvedPath = candidates.find((candidate) => fs.existsSync(candidate)) || '';
+    if (!resolvedPath) {
+      console.warn(`[firebase] FIREBASE_SERVICE_ACCOUNT_PATH points at a missing file: ${candidates[0]}`);
+      return null;
+    }
   }
   const raw = inline || (resolvedPath ? fs.readFileSync(resolvedPath, 'utf8') : '');
   if (!raw) return null;

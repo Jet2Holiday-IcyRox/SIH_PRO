@@ -19,13 +19,21 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 // The bridge is mirrored to disk. Without this, restarting the server would strand
 // every ABHA the portal already minted — the portal only mirrors at creation time,
 // so a patient who signed up yesterday would stop resolving at the kiosk today.
-const STORE_FILE = process.env.ABHA_DIRECTORY_FILE
-  || path.join(__dirname, '..', 'data', 'abha_directory.json');
+//
+// On a serverless host the bundle is read-only and /tmp is the only writable path, so
+// the mirror goes there. It survives warm invocations but not a cold start, which is
+// the best a filesystem mirror can do without a real datastore behind it — see the
+// deployment note in README.md.
+const DEFAULT_STORE = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'abha_directory.json')
+  : path.join(__dirname, '..', 'data', 'abha_directory.json');
+const STORE_FILE = process.env.ABHA_DIRECTORY_FILE || DEFAULT_STORE;
 
 // ABHA numbers are 14 digits, conventionally shown as 91-XXXX-XXXX-XXXX.
 const ABHA_NUMBER = /^\d{14}$/;

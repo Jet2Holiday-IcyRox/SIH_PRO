@@ -39,9 +39,9 @@ yarn-error.log*
 # ---------------------------------------------------------------------------
 # Local ABHA directory bridge (mirrors the portal; contains masked demo identities)
 data/abha_directory.json
-# Generated from the Ministry of Ayush workbook by scripts/build-terminology.js
-data/namaste_terminology.json
-# The source workbook itself — redistribute it from the Ministry, not from here
+# data/namaste_terminology.json IS committed: it is the NAMASTE release the deployed app
+# serves, and regenerating it needs the source workbook, which is not in the repo.
+# The workbook itself stays out — redistribute it from the Ministry, not from here.
 *.xls
 *.xlsx
 

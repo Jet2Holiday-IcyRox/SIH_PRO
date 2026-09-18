@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/index.js": {
+      "memory": 1024,
+      "maxDuration": 30,
+      "includeFiles": "{index.html,kiosk.html,worklist.html,admin.html,data/**,frontend/**,intake/**,backend/**,shared/**}"
+    }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index" }
+  ]
+}

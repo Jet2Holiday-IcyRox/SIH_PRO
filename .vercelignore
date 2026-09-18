@@ -1,0 +1,22 @@
+# Vercel already honours .gitignore; this trims what is left.
+#
+# The duplicated standalone demo stacks. They are byte-copies of the root portal with
+# their own servers and their own vendored node_modules, and nothing routes to them in
+# production — shipping them would triple the bundle for no gain.
+client/
+admin/
+
+# Local-only material
+test/
+test.js
+brag-output/
+graphify-out/
+*.xls
+*.xlsx
+README.md
+
+# Firebase CLI config — rules are deployed with `firebase deploy`, not with the app.
+.firebaserc
+firebase.json
+firestore.rules
+firestore.indexes.json
