@@ -88,9 +88,14 @@ const DEPLOY_FILES = [
 function deploymentReport() {
   const files = {};
   for (const rel of DEPLOY_FILES) files[rel] = fs.existsSync(path.join(__dirname, rel));
+  const listDir = (dir) => { try { return fs.readdirSync(dir).filter((n) => n !== 'node_modules'); } catch (e) { return e.code; } };
   return {
     platform: process.env.VERCEL ? 'vercel' : 'node',
+    node: process.version,
     root: __dirname,
+    entry: __filename,
+    cwd: process.cwd(),
+    tree: { root: listDir(__dirname), backend: listDir(path.join(__dirname, 'backend')), api: listDir(path.join(__dirname, 'api')) },
     backend: backendLoadError ? { loaded: false, error: backendLoadError } : { loaded: backendAppPromise !== null },
     files
   };

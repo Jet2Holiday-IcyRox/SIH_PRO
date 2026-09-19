@@ -4,6 +4,9 @@
   "private": true,
   "description": "NAMASTE ↔ ICD-11 (TM2) FHIR R4 Dual-Coding Platform for AYUSH EMRs",
   "main": "server.js",
+  "engines": {
+    "node": "22.x"
+  },
   "workspaces": [
     "backend"
   ],
