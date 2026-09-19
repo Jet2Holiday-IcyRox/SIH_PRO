@@ -88,14 +88,28 @@ const DEPLOY_FILES = [
 function deploymentReport() {
   const files = {};
   for (const rel of DEPLOY_FILES) files[rel] = fs.existsSync(path.join(__dirname, rel));
-  const listDir = (dir) => { try { return fs.readdirSync(dir).filter((n) => n !== 'node_modules'); } catch (e) { return e.code; } };
+  // Shallow recursive listing (node_modules excluded, capped) of what actually shipped.
+  const tree = [];
+  const walk = (dir, depth) => {
+    let names = [];
+    try { names = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+    for (const d of names) {
+      if (d.name === 'node_modules' || tree.length >= 150) continue;
+      const rel = path.relative(__dirname, path.join(dir, d.name));
+      tree.push(d.isDirectory() ? rel + '/' : rel);
+      if (d.isDirectory() && depth < 3) walk(path.join(dir, d.name), depth + 1);
+    }
+  };
+  walk(__dirname, 0);
   return {
     platform: process.env.VERCEL ? 'vercel' : 'node',
     node: process.version,
+    execArgv: process.execArgv,
+    nodeOptions: process.env.NODE_OPTIONS || '',
     root: __dirname,
     entry: __filename,
     cwd: process.cwd(),
-    tree: { root: listDir(__dirname), backend: listDir(path.join(__dirname, 'backend')), api: listDir(path.join(__dirname, 'api')) },
+    tree,
     backend: backendLoadError ? { loaded: false, error: backendLoadError } : { loaded: backendAppPromise !== null },
     files
   };
