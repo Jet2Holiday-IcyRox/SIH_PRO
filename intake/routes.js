@@ -54,7 +54,7 @@ function createIntakeRoutes({ terminology, terminologyMeta, curationQueue, readJ
     }
 
     if (pathname === '/api/abha/resolve' && method === 'GET') {
-      const resolved = abha.resolve(parsedQuery.q || parsedQuery.abha || '');
+      const resolved = await abha.resolve(parsedQuery.q || parsedQuery.abha || '');
       if (!resolved.ok) {
         sendJson(res, 200, { ok: false, error: resolved.error });
         return true;
@@ -83,10 +83,10 @@ function createIntakeRoutes({ terminology, terminologyMeta, curationQueue, readJ
     // ---- session lifecycle ----------------------------------------------
     if (pathname === '/api/intake/session' && method === 'POST') {
       const body = await readJsonBody(req);
-      const session = store.createSession(body);
+      let session = await store.createSession(body);
       if (body.abha) {
-        const resolved = abha.resolve(body.abha);
-        if (resolved.ok) store.attachAbha(session.id, resolved.abha);
+        const resolved = await abha.resolve(body.abha);
+        if (resolved.ok) session = (await store.attachAbha(session.id, resolved.abha)) || session;
       }
       sendJson(res, 201, {
         sessionId: session.id,
@@ -99,7 +99,7 @@ function createIntakeRoutes({ terminology, terminologyMeta, curationQueue, readJ
 
     const sessionMatch = pathname.match(/^\/api\/intake\/([a-f0-9]{12})(\/[a-z]+)?$/);
     if (sessionMatch) {
-      const session = store.getSession(sessionMatch[1]);
+      const session = await store.getSession(sessionMatch[1]);
       const action = sessionMatch[2] || '';
       if (!session) {
         sendJson(res, 404, { error: 'Session not found or already cleared.' });
@@ -109,8 +109,8 @@ function createIntakeRoutes({ terminology, terminologyMeta, curationQueue, readJ
 
       if (action === '/consent' && method === 'POST') {
         const body = await readJsonBody(req);
-        store.grantConsent(session.id, body.scopes || ['capture', 'share-with-his', 'link-abha']);
-        sendJson(res, 200, { consent: session.consent });
+        const updated = await store.grantConsent(session.id, body.scopes || ['capture', 'share-with-his', 'link-abha']);
+        sendJson(res, 200, { consent: updated ? updated.consent : null });
         return true;
       }
 
@@ -126,12 +126,12 @@ function createIntakeRoutes({ terminology, terminologyMeta, curationQueue, readJ
           sendJson(res, 400, { error: 'questionId is required.' });
           return true;
         }
-        store.recordAnswer(session.id, body.questionId, body.value);
+        const updated = (await store.recordAnswer(session.id, body.questionId, body.value)) || session;
 
         // Red flags are evaluated after every answer, not only at the end: a patient
         // describing crushing chest pain should not have to finish the interview first.
-        const redFlags = engine.evaluateRedFlags(session.answers, options);
-        const { question, progress } = engine.nextQuestion(session.answers, options);
+        const redFlags = engine.evaluateRedFlags(updated.answers, options);
+        const { question, progress } = engine.nextQuestion(updated.answers, options);
         sendJson(res, 200, {
           question,
           progress,
@@ -154,8 +154,8 @@ function createIntakeRoutes({ terminology, terminologyMeta, curationQueue, readJ
           results: extracted.results || [],
           extraction: extracted.source
         };
-        store.addDocument(session.id, document);
-        sendJson(res, 200, { document, documents: session.documents.length });
+        const updated = (await store.addDocument(session.id, document)) || session;
+        sendJson(res, 200, { document, documents: updated.documents.length });
         return true;
       }
 
@@ -170,11 +170,11 @@ function createIntakeRoutes({ terminology, terminologyMeta, curationQueue, readJ
         const polished = await llm.polishNarrative(summary);
         const bundle = coder.buildBundle({ session, summary, proposals, terminologyMeta });
 
-        const item = store.publish({
+        const item = await store.publish({
           session, summary, proposals, bundle, narrative: polished.text
         });
         // DPDP: the interview transcript is cleared as soon as it has been handed over.
-        store.endSession(session.id);
+        await store.endSession(session.id);
 
         sendJson(res, 201, {
           worklistId: item.id,
@@ -193,9 +193,10 @@ function createIntakeRoutes({ terminology, terminologyMeta, curationQueue, readJ
 
     // ---- physician worklist ---------------------------------------------
     if (pathname === '/api/worklist' && method === 'GET') {
+      const [stats, items] = await Promise.all([store.stats(), store.listWorklist()]);
       sendJson(res, 200, {
-        stats: store.stats(),
-        items: store.listWorklist().map((item) => ({
+        stats,
+        items: items.map((item) => ({
           id: item.id,
           patient: item.patient,
           priority: item.priority,
@@ -214,25 +215,25 @@ function createIntakeRoutes({ terminology, terminologyMeta, curationQueue, readJ
 
     const worklistMatch = pathname.match(/^\/api\/worklist\/([a-f0-9]{12})(\/review|\/abha)?$/);
     if (worklistMatch) {
-      const item = store.getWorklistItem(worklistMatch[1]);
+      const item = await store.getWorklistItem(worklistMatch[1]);
       if (!item) {
         sendJson(res, 404, { error: 'Not on the worklist.' });
         return true;
       }
       if (worklistMatch[2] === '/abha' && method === 'POST') {
         const body = await readJsonBody(req);
-        const resolved = abha.resolve(body.abha || '');
+        const resolved = await abha.resolve(body.abha || '');
         if (!resolved.ok) {
           sendJson(res, 400, { error: resolved.error });
           return true;
         }
-        sendJson(res, 200, { item: store.attachAbhaToWorklistItem(item.id, resolved.abha) });
+        sendJson(res, 200, { item: await store.attachAbhaToWorklistItem(item.id, resolved.abha) });
         return true;
       }
 
       if (worklistMatch[2] === '/review' && method === 'POST') {
         const body = await readJsonBody(req);
-        sendJson(res, 200, { item: store.reviewWorklistItem(item.id, body) });
+        sendJson(res, 200, { item: await store.reviewWorklistItem(item.id, body) });
         return true;
       }
       if (method === 'GET') {

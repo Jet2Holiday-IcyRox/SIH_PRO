@@ -8,10 +8,12 @@
  * presents an address, and the kiosk needs to confirm it is a real ABHA and show them
  * enough to say "yes, that's me".
  *
- * Those records live in the portal's Firebase, which the kiosk page cannot read (it
- * has no signed-in user). So the portal mirrors each masked directory entry here when
- * it creates one, and the kiosk resolves against this bridge. Only masked fields cross
- * over — the same fields the portal already treats as pre-consent-readable.
+ * Those records live in the portal's Firestore, which the kiosk page cannot read (it
+ * has no signed-in user). The server can: with a service account it resolves straight
+ * from the `abhaDirectory` collection the portal writes. Without one (a local clone
+ * with no Firebase) it falls back to the bridge below, which the portal fills by
+ * mirroring each masked entry at creation time. Either way only masked fields are
+ * used — the same fields the portal already treats as pre-consent-readable.
  *
  * An ABHA that does not resolve is still accepted, recorded as self-declared and
  * unverified. Refusing the patient would be worse, and silently upgrading them to
@@ -21,6 +23,12 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const db = require('./db');
+
+// The portal's collection and its document-id rule (index.html addressToKey): the
+// address lower-cased with the characters Firebase keys forbid replaced by '_'.
+const DIRECTORY_COLLECTION = 'abhaDirectory';
+const directoryDocId = (address) => String(address || '').trim().toLowerCase().replace(/[.#$/[\]]/g, '_');
 
 // The bridge is mirrored to disk. Without this, restarting the server would strand
 // every ABHA the portal already minted — the portal only mirrors at creation time,
@@ -133,9 +141,38 @@ function registerDirectoryEntry(entry) {
   return record;
 }
 
-const lookup = (parsed) => (parsed.kind === 'address'
+const lookupBridge = (parsed) => (parsed.kind === 'address'
   ? DIRECTORY.get(addressKey(parsed.address))
   : DIRECTORY.get(`num_${parsed.number}`)) || null;
+
+/** The portal's own directory. Documents are keyed by address; the number is a field. */
+async function lookupFirestore(parsed) {
+  const store = await db.getDb();
+  if (!store) return null;
+  try {
+    const collection = store.collection(DIRECTORY_COLLECTION);
+    let data = null;
+    if (parsed.kind === 'address') {
+      const snapshot = await collection.doc(directoryDocId(parsed.address)).get();
+      data = snapshot.exists ? snapshot.data() : null;
+    } else {
+      const snapshot = await collection.where('abhaKey', '==', parsed.number).limit(1).get();
+      data = snapshot.empty ? null : snapshot.docs[0].data();
+    }
+    if (!data) return null;
+    return {
+      abhaAddress: data.abhaAddress || null,
+      abhaNumberMasked: data.abhaNumberMasked || maskNumber(data.abhaKey) || null,
+      nameMasked: data.nameMasked || null,
+      gender: data.gender || null,
+      yearOfBirth: data.yearOfBirth || null,
+      mobileMasked: data.mobileMasked || '****'
+    };
+  } catch (err) {
+    console.warn('[ABHA] directory lookup failed:', err.message);
+    return null;
+  }
+}
 
 /**
  * Resolves an ABHA into the identity record stored on a session.
@@ -143,11 +180,11 @@ const lookup = (parsed) => (parsed.kind === 'address'
  * not that the person standing at the kiosk is its owner. Proving that needs an
  * OTP to the linked mobile, which is the next thing to wire in.
  */
-function resolve(input) {
+async function resolve(input) {
   const parsed = parse(input);
   if (!parsed.ok) return { ok: false, error: parsed.error };
 
-  const found = lookup(parsed);
+  const found = (await lookupFirestore(parsed)) || lookupBridge(parsed);
   return {
     ok: true,
     abha: {

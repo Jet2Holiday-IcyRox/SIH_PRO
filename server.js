@@ -98,7 +98,7 @@ const DEPLOY_FILES = [
   'frontend/admin/index.html', 'frontend/patient/index.html', 'frontend/shared/admin-api.js',
   'backend/src/app.js', 'node_modules/express/package.json', 'node_modules/firebase-admin/package.json'
 ];
-function deploymentReport() {
+async function deploymentReport() {
   const files = {};
   for (const rel of DEPLOY_FILES) files[rel] = fs.existsSync(path.join(__dirname, rel));
   // Shallow recursive listing (node_modules excluded, capped) of what actually shipped.
@@ -124,6 +124,8 @@ function deploymentReport() {
     cwd: process.cwd(),
     tree,
     backend: backendLoadError ? { loaded: false, error: backendLoadError } : { loaded: backendAppPromise !== null },
+    // 'firestore' or 'memory': where kiosk sessions, the worklist and ABHA lookups live.
+    kioskStore: await kioskDb.describe(),
     files
   };
 }
@@ -188,6 +190,7 @@ const STORED_CONDITIONS = [];
 
 // Clinical intake kiosk (SIH26047). Mounted below, after the FHIR operations.
 const { createIntakeRoutes } = require('./intake/routes');
+const kioskDb = require('./intake/db');
 let intakeRoutes = null;
 
 // Entity memory cache for instant offline & high-speed responses
@@ -361,7 +364,7 @@ async function handleRequest(req, res) {
         service: 'AyurFHIR Terminology Microservice',
         status: 'UP',
         timestamp: new Date().toISOString(),
-        deployment: deploymentReport(),
+        deployment: await deploymentReport(),
         versionStamps: {
           namasteRelease: TERMINOLOGY_META.namasteRelease || 'NAMASTE-2024.1',
           icd11Release: TERMINOLOGY_META.icd11Release || 'ICD-11-2026-01-MMS',
