@@ -21,12 +21,18 @@ export class FirebaseAdapter {
       return;
     }
 
-    const app = getApps().length
-      ? getApps()[0]
-      : initializeApp({ credential: cert(config.serviceAccount), projectId: config.serviceAccount.project_id });
-    this.auth = getAuth(app);
-    this.db = getFirestore(app);
-    this.live = true;
+    // A key that parses but cannot be used (wrong PEM, missing fields) must not throw at
+    // import: on a serverless host that is a 500 on every route, not just the auth ones.
+    try {
+      const app = getApps().length
+        ? getApps()[0]
+        : initializeApp({ credential: cert(config.serviceAccount), projectId: config.serviceAccount.project_id });
+      this.auth = getAuth(app);
+      this.db = getFirestore(app);
+      this.live = true;
+    } catch (error) {
+      console.warn(`[firebase] Service account rejected (${error.message}). Running with an in-memory store; ID tokens will NOT be verified.`);
+    }
   }
 
   get isLive() {

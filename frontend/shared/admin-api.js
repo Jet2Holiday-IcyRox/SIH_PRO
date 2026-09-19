@@ -57,7 +57,7 @@ function stopPolling() {
 
 function applySession(session, config) {
   if (config && !config.configured) {
-    authError('Firebase is not configured on this server yet. Add the FIREBASE_* values to backend/.env and restart.');
+    authError('Firebase is not configured on this server yet. Add the FIREBASE_* values to .env and restart.');
   }
 
   if (!session.authenticated) {

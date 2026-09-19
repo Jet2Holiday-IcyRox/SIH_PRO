@@ -22,10 +22,11 @@
 
 const path = require('path');
 
-// The root server is plain CommonJS and does not load backend/.env the way the ESM
-// backend does, so the key is read from the same file both halves already share.
+// server.js already loads the root .env before requiring this module, and a hosted
+// deploy has no file at all. This is only a fallback for the case where intake/ is
+// required directly (a test, a script), and it reads the same single root .env.
 try {
-  require('dotenv').config({ path: path.join(__dirname, '..', 'backend', '.env'), quiet: true });
+  require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
 } catch (err) { /* dotenv is optional; real env vars still work */ }
 
 const TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 12000);

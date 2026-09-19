@@ -18,7 +18,7 @@ function showConfigWarning(config) {
   const el = document.getElementById('auth-config-warning');
   if (!el) return;
   if (config && config.configured) { el.classList.add('hidden'); return; }
-  el.innerText = 'Firebase sign-in is not configured on this server yet. Add the FIREBASE_* values to backend/.env and restart, or continue as a guest.';
+  el.innerText = 'Firebase sign-in is not configured on this server yet. Add the FIREBASE_* values to .env and restart, or continue as a guest.';
   el.classList.remove('hidden');
 }
 

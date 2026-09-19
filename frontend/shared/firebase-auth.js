@@ -80,7 +80,7 @@ export function initAuth() {
     state.config = await fetchClientConfig();
 
     if (!state.config.configured) {
-      console.warn('[auth] Firebase Web config is missing on the backend. Fill FIREBASE_* in backend/.env.');
+      console.warn('[auth] Firebase Web config is missing on the backend. Fill FIREBASE_* in .env.');
       notify();
       return state;
     }
@@ -128,7 +128,7 @@ function assertReady() {
   if (!isConfigured()) {
     const reason = state.config?.error === 'sdk-missing'
       ? 'The Firebase SDK failed to load in this browser.'
-      : 'Firebase is not configured on the server yet. Add the FIREBASE_* values to backend/.env and restart.';
+      : 'Firebase is not configured on the server yet. Add the FIREBASE_* values to .env and restart.';
     throw new Error(reason);
   }
 }

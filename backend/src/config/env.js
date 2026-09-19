@@ -31,11 +31,29 @@ function loadServiceAccount() {
   }
   const raw = inline || (resolvedPath ? fs.readFileSync(resolvedPath, 'utf8') : '');
   if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    throw new Error(`Firebase service account is not valid JSON: ${error.message}`);
+  return parseServiceAccount(raw);
+}
+
+// A key pasted into a hosting dashboard arrives mangled in a few predictable ways: the quotes
+// copied along with the .env line, the private key's "\n" escapes doubled, or real line breaks
+// inside the string. All of them used to throw here, at import, which took every route down —
+// including the pages that never touch Firebase. Now they are repaired, and a key that is still
+// unreadable degrades to the in-memory store with a warning instead of a crash.
+function parseServiceAccount(raw) {
+  const text = raw.trim().replace(/^['"]|['"]$/g, '');
+  const candidates = [text, text.replace(/\r?\n/g, '\\n')];
+  let lastError = null;
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (typeof parsed.private_key === 'string') parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+      return parsed;
+    } catch (error) {
+      lastError = error;
+    }
   }
+  console.warn(`[firebase] Service account is not valid JSON (${lastError.message}); running without it.`);
+  return null;
 }
 
 const serviceAccount = loadServiceAccount();

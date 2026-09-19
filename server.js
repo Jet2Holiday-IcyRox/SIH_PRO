@@ -242,7 +242,24 @@ function sendJson(res, statusCode, data) {
 
 // The request handler is defined standalone and exported so a serverless platform
 // (Vercel) can invoke it per-request, while a normal `node server.js` still binds a port.
+// On Vercel every request is rewritten to /api/index (vercel.json), and the function
+// receives the rewritten URL - not the one the browser asked for - so /worklist,
+// /kiosk and /api/* would all fall through to index.html. The rewrite copies the
+// original path into the __vercel_path query parameter; put it back on req.url before
+// routing so the rest of this file (and the mounted Express backend) never notices.
+function restoreOriginalUrl(req) {
+  const qIndex = req.url.indexOf('?');
+  if (qIndex === -1) return;
+  const params = new URLSearchParams(req.url.slice(qIndex + 1));
+  const original = params.get('__vercel_path');
+  if (original === null) return;
+  params.delete('__vercel_path');
+  const search = params.toString();
+  req.url = (original.startsWith('/') ? original : '/' + original) + (search ? '?' + search : '');
+}
+
 async function handleRequest(req, res) {
+  restoreOriginalUrl(req);
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
   const method = req.method.toUpperCase();
