@@ -58,18 +58,42 @@ const PRIVATE_FILES = new Set(['server.js', 'test.js', 'package.json', 'package-
 const BACKEND_PREFIXES = ['/shared/', '/patient', '/admin', '/api/v1/auth/', '/api/v1/admin/'];
 
 let backendAppPromise = null;
+// Why the backend failed to load, surfaced by /api/health so a broken deploy is
+// diagnosable without digging through platform logs.
+let backendLoadError = null;
 function getBackendApp() {
   if (!backendAppPromise) {
-    const entry = url.pathToFileURL(path.join(__dirname, 'backend', 'src', 'app.js')).href;
-    backendAppPromise = import(entry)
+    // A literal specifier (not a computed file URL) so Vercel's bundler can trace the
+    // backend and its dependencies (express, firebase-admin) into the function.
+    backendAppPromise = import('./backend/src/app.js')
       .then((mod) => mod.default)
       .catch((err) => {
+        backendLoadError = err.message;
         console.warn('[BACKEND] Could not load backend/src/app.js:', err.message);
         console.warn('[BACKEND] /admin and the auth API are unavailable; the portal still works.');
         return null;
       });
   }
   return backendAppPromise;
+}
+
+// Files the function must ship with that Vercel cannot discover by tracing server.js:
+// the pages are picked by route table and the backend serves whole directories.
+const DEPLOY_FILES = [
+  'index.html', 'kiosk.html', 'worklist.html',
+  'data/namaste_terminology.json',
+  'frontend/admin/index.html', 'frontend/patient/index.html', 'frontend/shared/admin-api.js',
+  'backend/src/app.js', 'node_modules/express/package.json', 'node_modules/firebase-admin/package.json'
+];
+function deploymentReport() {
+  const files = {};
+  for (const rel of DEPLOY_FILES) files[rel] = fs.existsSync(path.join(__dirname, rel));
+  return {
+    platform: process.env.VERCEL ? 'vercel' : 'node',
+    root: __dirname,
+    backend: backendLoadError ? { loaded: false, error: backendLoadError } : { loaded: backendAppPromise !== null },
+    files
+  };
 }
 
 function isBackendPath(pathname) {
@@ -291,6 +315,8 @@ async function handleRequest(req, res) {
     // GET /api/health
     // -------------------------------------------------------------
     if (pathname === '/api/health' && method === 'GET') {
+      // Attempt the backend so the report below can say whether it loads.
+      await getBackendApp();
       let icdContainerUp = false;
       try {
         const testRes = await fetchIcd11('/icd/release/11/mms');
@@ -303,6 +329,7 @@ async function handleRequest(req, res) {
         service: 'AyurFHIR Terminology Microservice',
         status: 'UP',
         timestamp: new Date().toISOString(),
+        deployment: deploymentReport(),
         versionStamps: {
           namasteRelease: TERMINOLOGY_META.namasteRelease || 'NAMASTE-2024.1',
           icd11Release: TERMINOLOGY_META.icd11Release || 'ICD-11-2026-01-MMS',

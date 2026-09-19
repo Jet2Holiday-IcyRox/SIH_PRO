@@ -2,13 +2,14 @@
 #
 # The duplicated standalone demo stacks. They are byte-copies of the root portal with
 # their own servers and their own vendored node_modules, and nothing routes to them in
-# production — shipping them would triple the bundle for no gain.
-client/
-admin/
+# production — shipping them would triple the bundle for no gain. Anchored with a
+# leading slash: a bare "admin/" would also drop frontend/admin/, the real console.
+/client/
+/admin/
 
 # Local-only material
-test/
-test.js
+/test/
+/test.js
 brag-output/
 graphify-out/
 *.xls
