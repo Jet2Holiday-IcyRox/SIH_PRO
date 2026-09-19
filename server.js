@@ -36,15 +36,28 @@ const RELEASE_DATA_FILE = path.join(__dirname, 'data', 'namaste_terminology.json
 // served by their own standalone servers.
 const STATIC_ROOT = __dirname;
 
+// Each page is named with a literal path, and checked with fs below, because that is
+// what Vercel's file tracer follows when deciding what to ship with the function. A
+// route table of bare strings is just data to it, and kiosk/worklist never deployed.
+const INDEX_PAGE = path.join(__dirname, 'index.html');
+const KIOSK_PAGE = path.join(__dirname, 'kiosk.html');
+const WORKLIST_PAGE = path.join(__dirname, 'worklist.html');
+const ADMIN_PAGE = path.join(__dirname, 'admin.html');
+// One literal call per page (not a loop) so each path stays statically visible.
+if (!fs.existsSync(INDEX_PAGE)) console.warn('[PAGES] Missing index.html next to server.js');
+if (!fs.existsSync(KIOSK_PAGE)) console.warn('[PAGES] Missing kiosk.html next to server.js');
+if (!fs.existsSync(WORKLIST_PAGE)) console.warn('[PAGES] Missing worklist.html next to server.js');
+if (!fs.existsSync(ADMIN_PAGE)) console.warn('[PAGES] Missing admin.html next to server.js');
+
 // Only the practitioner portal is served from here. '/admin' is handled by the
 // backend app below, which owns the real admin console in frontend/admin/.
 const PAGE_ROUTES = {
-  '/': 'index.html',
+  '/': INDEX_PAGE,
   // Patient-facing clinical intake kiosk and the physician worklist it feeds.
-  '/kiosk': 'kiosk.html',
-  '/kiosk/': 'kiosk.html',
-  '/worklist': 'worklist.html',
-  '/worklist/': 'worklist.html'
+  '/kiosk': KIOSK_PAGE,
+  '/kiosk/': KIOSK_PAGE,
+  '/worklist': WORKLIST_PAGE,
+  '/worklist/': WORKLIST_PAGE
 };
 
 // STATIC_ROOT is the repository root, so only root-level assets are servable and
@@ -121,7 +134,7 @@ function isBackendPath(pathname) {
 
 function resolveStatic(pathname) {
   const route = PAGE_ROUTES[pathname];
-  if (route) return path.join(STATIC_ROOT, route);
+  if (route) return route;
 
   const name = pathname.replace(/^\/+/, '');
   // Reject subdirectories, dotfiles and the server's own sources.
@@ -699,7 +712,7 @@ async function handleRequest(req, res) {
     // -------------------------------------------------------------
     // 8. Static File Server (serves index.html and root-level assets)
     // -------------------------------------------------------------
-    let filePath = resolveStatic(pathname) || path.join(STATIC_ROOT, 'index.html');
+    let filePath = resolveStatic(pathname) || INDEX_PAGE;
 
     // Belt and braces: resolveStatic already rejects separators, but re-check the
     // resolved path in case STATIC_ROOT ever moves.
@@ -711,7 +724,7 @@ async function handleRequest(req, res) {
     fs.stat(filePath, (err, stats) => {
       if (err || !stats.isFile()) {
         // If not found, fallback to index.html for client-side navigation
-        filePath = path.join(STATIC_ROOT, 'index.html');
+        filePath = INDEX_PAGE;
       }
 
       const ext = path.extname(filePath).toLowerCase();

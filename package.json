@@ -10,6 +10,9 @@
   "workspaces": [
     "backend"
   ],
+  "overrides": {
+    "jwks-rsa": "^3.2.2"
+  },
   "scripts": {
     "dev": "node server.js",
     "start": "node server.js",
